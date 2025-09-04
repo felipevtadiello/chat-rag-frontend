@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API_BASE_URL = "https://sua-api.onrender.com"
+API_BASE_URL = "https://api-rag-6qqf.onrender.com"
 
 try:
     API_KEY_HEADER = {
