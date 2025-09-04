@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API_BASE_URL = "https://api-rag-6qqf.onrender.com"
+API_BASE_URL = "https://sua-api.onrender.com"
 
 try:
     API_KEY_HEADER = {
@@ -36,11 +36,9 @@ def chat_page():
                         json={"question": user_question, "chat_history": st.session_state.chat_history}
                     )
                     response.raise_for_status()
-
                     answer = response.json().get("answer")
                     st.markdown(answer)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
                 except requests.exceptions.RequestException as e:
                     st.error(f"Erro de comunicação com a API: {e.response.json()}")
                 except Exception as e:
@@ -66,13 +64,28 @@ def admin_page():
         processed_docs = response.json()
 
         if processed_docs:
-            for doc in processed_docs:
-                st.info(f"📄 {doc}")
+            for doc_name in processed_docs:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.info(f"📄 {doc_name}")
+                with col2:
+                    if st.button("Remover", key=f"del_{doc_name}", type="primary"):
+                        with st.spinner(f"Removendo {doc_name}..."):
+                            delete_response = requests.post(
+                                f"{API_BASE_URL}/delete-document/",
+                                headers=API_KEY_HEADER,
+                                json={"filename": doc_name}
+                            )
+                            if delete_response.status_code == 200:
+                                st.success(f"'{doc_name}' removido com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Falha ao remover: {delete_response.json().get('detail')}")
         else:
             st.info("Nenhum documento foi processado ainda.")
 
     except requests.exceptions.RequestException as e:
-        st.error(f"Não foi possível buscar la lista de documentos: {e}")
+        st.error(f"Não foi possível buscar a lista de documentos: {e}")
     except Exception as e:
         st.error(f"Ocorreu um erro: {e}")
 
@@ -85,19 +98,16 @@ def admin_page():
             with st.spinner("Enviando e processando documento..."):
                 try:
                     files_to_send = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-
                     response = requests.post(
                         f"{API_BASE_URL}/upload-and-process/",
                         headers=API_KEY_HEADER,
                         files=files_to_send
                     )
-
                     if response.status_code == 200:
-                        st.success(response.json().get("message", "Documento adicionado! A lista será atualizada."))
+                        st.success(response.json().get("message", "Documento adicionado!"))
                         st.rerun()
                     else:
                         st.error(f"Falha no processamento: {response.json().get('detail')}")
-
                 except Exception as e:
                     st.error(f"Ocorreu um erro inesperado: {e}")
         else:
