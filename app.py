@@ -19,6 +19,37 @@ except (KeyError, FileNotFoundError):
 def chat_page():
     st.header("Converse com seus documentos 💬")
     
+    try:
+        response = requests.get(f"{API_BASE_URL}/list-courses/", headers=API_KEY_HEADER)
+        response.raise_for_status()
+        available_courses = response.json()
+        
+        if not available_courses:
+            st.warning("⚠️ Nenhum curso disponível ainda. Entre em contato com o administrador.")
+            return
+        
+        if "selected_course" not in st.session_state:
+            st.session_state.selected_course = available_courses[0]
+        
+        selected_course = st.selectbox(
+            "📚 Selecione seu curso:",
+            options=available_courses,
+            index=available_courses.index(st.session_state.selected_course) if st.session_state.selected_course in available_courses else 0,
+            key="course_selector"
+        )
+        
+        if selected_course != st.session_state.selected_course:
+            st.session_state.selected_course = selected_course
+            st.session_state.chat_history = []
+            st.rerun()
+        
+        st.info(f"🎓 Conversando com documentos do curso: **{selected_course}**")
+        st.markdown("---")
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro ao carregar cursos. Verifique se o servidor está rodando. Detalhes: {e}")
+        return
+    
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     
@@ -46,7 +77,11 @@ def chat_page():
                     response = requests.post(
                         f"{API_BASE_URL}/ask/",
                         headers=API_KEY_HEADER,
-                        json={"question": user_question, "chat_history": st.session_state.chat_history}
+                        json={
+                            "question": user_question, 
+                            "course": st.session_state.selected_course,  
+                            "chat_history": st.session_state.chat_history
+                        }
                     )
                     response.raise_for_status()
                     
@@ -72,9 +107,10 @@ def chat_page():
                     })
 
                 except requests.exceptions.RequestException as e:
-                    st.error(f"Erro de comunicação com a API. Verifique se o servidor backend (uvicorn) está rodando. Detalhes: {e}")
+                    st.error(f"Erro de comunicação com a API: {e}")
                 except Exception as e:
                     st.error(f"Ocorreu um erro: {e}")
+
 
 def admin_page():
     st.header("Área do Administrador 🔑")
@@ -83,49 +119,81 @@ def admin_page():
         st.success("Acesso liberado!")
         st.markdown("---")
 
-        st.subheader("Documentos na Base de Conhecimento")
+        try:
+            response = requests.get(f"{API_BASE_URL}/list-courses/", headers=API_KEY_HEADER)
+            response.raise_for_status()
+            existing_courses = response.json()
+        except:
+            existing_courses = []
+
+        st.subheader("📚 Documentos por Curso")
         try:
             response = requests.get(f"{API_BASE_URL}/list-documents/", headers=API_KEY_HEADER)
             response.raise_for_status()
-            processed_docs = response.json()
+            documents_by_course = response.json()
             
-            if processed_docs:
-                for doc_name in processed_docs:
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.info(f"📄 {doc_name}")
-                    with col2:
-                        if st.button("Remover", key=f"del_{doc_name}", type="primary"):
-                            with st.spinner(f"Removendo {doc_name}..."):
-                                delete_response = requests.post(
-                                    f"{API_BASE_URL}/delete-document/",
-                                    headers=API_KEY_HEADER,
-                                    json={"filename": doc_name}
-                                )
-                                if delete_response.status_code == 200:
-                                    st.success(f"'{doc_name}' removido com sucesso!")
-                                    st.rerun()
-                                else:
-                                    st.error(f"Falha ao remover: {delete_response.json().get('detail')}")
+            if documents_by_course:
+                for course_name, doc_list in sorted(documents_by_course.items()):
+                    with st.expander(f"🎓 {course_name} ({len(doc_list)} documentos)"):
+                        for doc_name in doc_list:
+                            col1, col2 = st.columns([4, 1])
+                            with col1:
+                                st.info(f"📄 {doc_name}")
+                            with col2:
+                                if st.button("Remover", key=f"del_{course_name}_{doc_name}", type="primary"):
+                                    with st.spinner(f"Removendo {doc_name}..."):
+                                        delete_response = requests.post(
+                                            f"{API_BASE_URL}/delete-document/",
+                                            headers=API_KEY_HEADER,
+                                            json={
+                                                "filename": doc_name,
+                                                "course": course_name  
+                                            }
+                                        )
+                                        if delete_response.status_code == 200:
+                                            st.success(f"'{doc_name}' removido com sucesso!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Falha ao remover: {delete_response.json().get('detail')}")
             else:
                 st.info("Nenhum documento foi processado ainda.")
         except requests.exceptions.RequestException as e:
-            st.error(f"Não foi possível buscar a lista de documentos. Verifique se a API está rodando. Detalhes: {e}")
+            st.error(f"Não foi possível buscar documentos. Verifique se a API está rodando. Detalhes: {e}")
         except Exception as e:
             st.error(f"Ocorreu um erro: {e}")
 
         st.markdown("---")
-        st.subheader("Adicionar Novos Documentos")
+        st.subheader("➕ Adicionar Novos Documentos")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            course_option = st.radio(
+                "Escolha uma opção:",
+                ["Selecionar curso existente", "Criar novo curso"],
+                key="course_option"
+            )
+        
+        with col2:
+            if course_option == "Selecionar curso existente":
+                if existing_courses:
+                    selected_course = st.selectbox("Curso:", existing_courses)
+                else:
+                    st.warning("Nenhum curso existe ainda. Crie um novo curso.")
+                    selected_course = None
+            else:
+                selected_course = st.text_input("Nome do novo curso:")
+        
         document_name = st.text_input("Nome do Documento (como ele aparecerá na lista):")
         uploaded_file = st.file_uploader("Carregue o arquivo correspondente (PDF, DOCX, TXT):", type=["pdf", "docx", "txt"])
 
         if st.button("Processar e Adicionar Documento"):
-            if uploaded_file and document_name:
+            if uploaded_file and document_name and selected_course:
                 with st.spinner("Enviando e processando documento..."):
                     try:
                         files_and_data = {
                             'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type),
-                            'doc_name': (None, document_name)
+                            'doc_name': (None, document_name),
+                            'course': (None, selected_course)  
                         }
                         response = requests.post(
                             f"{API_BASE_URL}/upload-and-process/", 
@@ -140,7 +208,7 @@ def admin_page():
                     except Exception as e:
                         st.error(f"Ocorreu um erro inesperado: {e}")
             else:
-                st.warning("Por favor, preencha o nome do documento e carregue um arquivo.")
+                st.warning("Por favor, preencha todos os campos e carregue um arquivo.")
 
     else:
         st.warning("Você precisa de acesso de administrador para ver esta página.")
@@ -154,8 +222,9 @@ def admin_page():
             else:
                 st.error("Senha incorreta.")
 
+
 def main():
-    st.set_page_config(page_title="Chat com Documentos (Local)", page_icon="💻")
+    st.set_page_config(page_title="Chat com Documentos por Curso", page_icon="🎓")
     
     if 'authenticated' not in st.session_state:
         st.session_state['authenticated'] = False
