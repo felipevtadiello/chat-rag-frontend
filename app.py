@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import os
+import pandas as pd # Adicione esta importação no topo do app.py
 from dotenv import load_dotenv
 
 API_BASE_URL = "http://127.0.0.1:8000" 
@@ -17,7 +18,7 @@ except (KeyError, FileNotFoundError):
 
 
 def chat_page():
-    st.header("Converse com seus documentos 💬")
+    st.header("Converse com os documentos 💬")
     
     try:
         response = requests.get(f"{API_BASE_URL}/list-courses/", headers=API_KEY_HEADER)
@@ -111,7 +112,123 @@ def chat_page():
                 except Exception as e:
                     st.error(f"Ocorreu um erro: {e}")
 
+def dashboard_page():
+    st.header("Dashboard de Estatísticas 📈")
 
+    if not st.session_state.get('authenticated', False):
+        st.error("🔒 Você precisa estar logado como administrador para ver esta página.")
+        st.info("Acesse a página 'Administrador' para fazer login.")
+        return
+
+    st.subheader("Visão Geral")
+    try:
+        # Chama o novo endpoint de overview
+        response = requests.get(f"{API_BASE_URL}/stats/overview", headers=API_KEY_HEADER)
+        response.raise_for_status()
+        stats = response.json()
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total de Perguntas", stats.get("total_questions", 0))
+        col2.metric("Total de Cursos", stats.get("total_courses", 0))
+        col3.metric("Total de Vetores (Chunks)", stats.get("total_vectors", 0))
+
+    except Exception as e:
+        st.error(f"Erro ao carregar visão geral: {e}")
+
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Perguntas por Curso")
+        try:
+            # Chama o endpoint de perguntas por curso
+            response = requests.get(f"{API_BASE_URL}/stats/questions-by-course", headers=API_KEY_HEADER)
+            response.raise_for_status()
+            q_by_course = response.json()
+
+            if q_by_course:
+                # Prepara dados para o gráfico de barras
+                df_courses = pd.DataFrame(
+                    list(q_by_course.items()), 
+                    columns=['Curso', 'Total de Perguntas']
+                ).set_index('Curso')
+                st.bar_chart(df_courses)
+            else:
+                st.info("Nenhuma pergunta registrada ainda.")
+
+        except Exception as e:
+            st.error(f"Erro ao carregar perguntas por curso: {e}")
+
+    with col2:
+        st.subheader("Documentos por Curso")
+        try:
+            # Reutiliza o endpoint existente de listar documentos
+            response = requests.get(f"{API_BASE_URL}/list-documents/", headers=API_KEY_HEADER)
+            response.raise_for_status()
+            docs_by_course = response.json()
+
+            if docs_by_course:
+                # Conta os documentos por curso
+                doc_counts = {course: len(docs) for course, docs in docs_by_course.items()}
+                df_docs = pd.DataFrame(
+                    list(doc_counts.items()), 
+                    columns=['Curso', 'Total de Documentos']
+                ).set_index('Curso')
+                st.bar_chart(df_docs)
+            else:
+                st.info("Nenhum documento encontrado.")
+        except Exception as e:
+            st.error(f"Erro ao carregar documentos por curso: {e}")
+
+    st.markdown("---")
+
+    st.subheader("Últimas Perguntas Registradas")
+    try:
+        # Chama o endpoint de perguntas recentes
+        response = requests.get(f"{API_BASE_URL}/stats/recent-questions", headers=API_KEY_HEADER)
+        response.raise_for_status()
+        recent_questions = response.json()
+        
+        if recent_questions:
+            # Formata para um DataFrame do Pandas para exibir bonito
+            df_recent = pd.DataFrame(recent_questions)
+            df_recent = df_recent[['timestamp', 'course', 'question', 'answer']]
+            
+            # --- INÍCIO DA CORREÇÃO DE FUSO HORÁRIO ---
+            
+            # 1. Converte a string de data/hora para um objeto datetime
+            #    e informa que o fuso horário original é UTC.
+            df_recent['timestamp'] = pd.to_datetime(df_recent['timestamp'], utc=True)
+            
+            # 2. Converte o fuso horário de UTC para o do Brasil (America/Sao_Paulo)
+            try:
+                df_recent['timestamp'] = df_recent['timestamp'].dt.tz_convert('America/Sao_Paulo')
+            except Exception as e:
+                # Fallback caso o fuso 'America/Sao_Paulo' não seja encontrado no sistema
+                st.warning("Não foi possível converter para 'America/Sao_Paulo', exibindo em UTC.")
+                df_recent['timestamp'] = df_recent['timestamp'].dt.tz_localize(None) # Remove o fuso para formatar
+            
+            # 3. Formata a string de data/hora já convertida
+            df_recent['timestamp'] = df_recent['timestamp'].dt.strftime('%d/%m/%Y %H:%M:%S')
+            
+            # --- FIM DA CORREÇÃO ---
+
+            st.dataframe(
+                df_recent,
+                column_config={
+                    "timestamp": "Data/Hora (Local)", # Atualizado o nome da coluna
+                    "course": "Curso",
+                    "question": "Pergunta",
+                    "answer": "Resposta"
+                },
+                use_container_width=True
+            )
+        else:
+            st.info("Nenhuma pergunta registrada ainda.")
+    except Exception as e:
+        st.error(f"Erro ao carregar perguntas recentes: {str(e)}")
+            
 def admin_page():
     st.header("Área do Administrador 🔑")
 
@@ -229,9 +346,9 @@ def main():
     if 'authenticated' not in st.session_state:
         st.session_state['authenticated'] = False
 
-    selected_page = st.sidebar.radio("Navegação", ["Chat com Documentos", "Administrador"])
+    selected_page = st.sidebar.radio("Navegação", ["Chat com Documentos", "Administrador", "Dashboard"])
     
-    if st.session_state['authenticated'] and selected_page == "Administrador":
+    if st.session_state['authenticated'] and (selected_page == "Administrador" or selected_page == "Dashboard"): # <- AJUSTE AQUI
         if st.sidebar.button("Sair (Logout)"):
             st.session_state['authenticated'] = False
             st.rerun()
@@ -240,6 +357,8 @@ def main():
         chat_page()
     elif selected_page == "Administrador":
         admin_page()
+    elif selected_page == "Dashboard": # <- ADICIONE AQUI
+        dashboard_page() #
 
 if __name__ == '__main__':
     main()
