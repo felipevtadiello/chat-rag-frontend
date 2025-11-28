@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 st.set_page_config(page_title="Sistema Acadêmico RAG", page_icon="🎓", layout="wide")
 
 load_dotenv()
-API_BASE_URL = "http://127.0.0.1:8000"
+API_BASE_URL = "https://api-rag-6qqf.onrender.com"
 
 if "token" not in st.session_state:
     st.session_state.token = None
